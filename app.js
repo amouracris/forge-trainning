@@ -398,13 +398,27 @@ const AI = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
+    const txt = await res.text();
     if (!res.ok) {
-      const err = await res.text();
-      let msg;
-      try { msg = JSON.parse(err).error || err; } catch { msg = err; }
-      throw new Error('Coach indisponível: ' + msg.slice(0, 200));
+      let msg = txt;
+      try {
+        const parsed = JSON.parse(txt);
+        if (parsed.error) {
+          // error can be string or { code, message, status }
+          msg = typeof parsed.error === 'string'
+            ? parsed.error
+            : (parsed.error.message || JSON.stringify(parsed.error));
+        }
+      } catch {}
+      throw new Error('Coach indisponível: ' + String(msg).slice(0, 250));
     }
-    const data = await res.json();
+    let data;
+    try { data = JSON.parse(txt); } catch { throw new Error('Resposta inválida do Coach'); }
+    // Gemini also wraps errors inside 200 sometimes
+    if (data.error) {
+      const m = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
+      throw new Error('Coach erro: ' + String(m).slice(0, 250));
+    }
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '(sem resposta)';
   }
 };
