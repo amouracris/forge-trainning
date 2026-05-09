@@ -76,6 +76,45 @@ function exImage(ex) {
   return IMG_BASE + ex.images[0];
 }
 
+/* Muscle group → color mapping for stylized cards */
+const MUSCLE_COLORS = {
+  'Peito': { color: '#ef4444', dark: '#b91c1c', label: 'Peito' },
+  'Costas (meio)': { color: '#2563eb', dark: '#1e40af', label: 'Costas' },
+  'Dorsais': { color: '#2563eb', dark: '#1e40af', label: 'Costas' },
+  'Lombar': { color: '#2563eb', dark: '#1e40af', label: 'Costas' },
+  'Quadríceps': { color: '#16a34a', dark: '#15803d', label: 'Pernas' },
+  'Posterior de coxa': { color: '#16a34a', dark: '#15803d', label: 'Pernas' },
+  'Panturrilhas': { color: '#16a34a', dark: '#15803d', label: 'Pernas' },
+  'Adutores': { color: '#16a34a', dark: '#15803d', label: 'Pernas' },
+  'Abdutores': { color: '#16a34a', dark: '#15803d', label: 'Pernas' },
+  'Glúteos': { color: '#a855f7', dark: '#7e22ce', label: 'Glúteos' },
+  'Ombros': { color: '#f59e0b', dark: '#b45309', label: 'Ombros' },
+  'Trapézio': { color: '#f59e0b', dark: '#b45309', label: 'Ombros' },
+  'Pescoço': { color: '#f59e0b', dark: '#b45309', label: 'Pescoço' },
+  'Bíceps': { color: '#06b6d4', dark: '#0e7490', label: 'Bíceps' },
+  'Antebraços': { color: '#06b6d4', dark: '#0e7490', label: 'Bíceps' },
+  'Tríceps': { color: '#ec4899', dark: '#be185d', label: 'Tríceps' },
+  'Abdômen': { color: '#14b8a6', dark: '#0f766e', label: 'Core' },
+};
+function muscleStyle(ex) {
+  const primary = (ex && ex.primary && ex.primary[0]) || null;
+  return MUSCLE_COLORS[primary] || { color: '#ff6a00', dark: '#c2410c', label: 'Treino' };
+}
+function muscleIcon(ex) {
+  const primary = (ex && ex.primary && ex.primary[0]) || '';
+  if (['Quadríceps','Posterior de coxa','Panturrilhas','Glúteos','Adutores','Abdutores'].includes(primary)) return 'run';
+  if (primary === 'Abdômen') return 'flex';
+  return 'dumbbell';
+}
+function muscleThumb(ex, size = 72, withLabel = false) {
+  const m = muscleStyle(ex);
+  const ic = muscleIcon(ex);
+  return `<div style="width: 100%; height: 100%; background: linear-gradient(135deg, ${m.color} 0%, ${m.dark} 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; gap: 4px;">
+    ${icon(ic, size > 60 ? 28 : 22)}
+    ${withLabel ? `<div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9;">${m.label}</div>` : ''}
+  </div>`;
+}
+
 /* ===== PLANS ===== */
 const Plans = {
   list() { return Store.get('plans', []); },
@@ -627,8 +666,6 @@ function screenMusculacao() {
 }
 
 function exerciseCard(ex, idx, workout) {
-  const exData = ex.exId ? EX_BY_ID[ex.exId] : null;
-  const photo = exImage(exData);
   const done = ex.finished;
   const setsDone = ex.log.filter(s => s.done).length;
   const setsTotal = ex.log.length;
@@ -636,11 +673,12 @@ function exerciseCard(ex, idx, workout) {
   const status = done ? 'feito' : (isExpanded ? 'atual' : 'pendente');
   const statusLabel = done ? 'Feito' : (isExpanded ? 'Atual' : (setsDone > 0 ? 'Em andamento' : 'Pendente'));
 
+  const exData = ex.exId ? EX_BY_ID[ex.exId] : null;
   return `
     <div class="ex-card ${done ? 'done' : ''} ${isExpanded ? 'active' : ''}">
       <div class="ex-row" onclick="toggleExpand(${idx})">
         <div class="ex-thumb">
-          ${photo ? `<img src="${photo}" alt="${escapeHtml(ex.name)}" onerror="this.style.display='none'"/>` : `<div class="ph-icon">${icon('image', 24)}</div>`}
+          ${muscleThumb(exData)}
           <div class="ex-pill ${status}">${statusLabel}</div>
         </div>
         <div class="ex-info">
@@ -663,14 +701,14 @@ function exerciseExpanded(ex, idx) {
   const photo = exImage(exData);
   const lastWeight = Workouts.lastWeight(ex.name);
   const prev = lastWeight ? `${fmt(lastWeight, 1)} kg` : '—';
+  const m = muscleStyle(exData);
 
   return `
     <div class="ex-expanded" onclick="event.stopPropagation()">
-      ${photo ? `
-        <div style="aspect-ratio: 4/3; border-radius: 10px; margin: 8px 0 12px; overflow: hidden;">
-          <img src="${photo}" alt="${escapeHtml(ex.name)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.style.display='none'"/>
-        </div>
-      ` : ''}
+      <div style="aspect-ratio: 16/10; border-radius: 12px; margin: 8px 0 12px; overflow: hidden; position: relative;">
+        ${muscleThumb(exData, 100, true)}
+        ${photo ? `<button class="ctrl-btn" style="position: absolute; bottom: 10px; right: 10px; padding: 6px 10px; font-size: 10px; background: rgba(255,255,255,0.92); color: var(--text); border: none;" onclick="event.stopPropagation(); showExercisePhoto('${exData.id}')">${icon('image', 12)} Ver foto</button>` : ''}
+      </div>
       ${exData ? `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">${escapeHtml(exData.primary.join(', '))} · ${escapeHtml(exData.equipment)} · ${escapeHtml(exData.level)}</div>` : ''}
 
       <div class="sets-list">
@@ -981,7 +1019,7 @@ function screenBiblioteca() {
       ${showing.map(ex => `
         <div class="lib-card" onclick="openExerciseDetail('${ex.id}')">
           <div class="lib-photo">
-            ${exImage(ex) ? `<img src="${exImage(ex)}" alt="${escapeHtml(ex.name)}" style="width:100%; height:100%; object-fit: cover;" onerror="this.style.display='none'" loading="lazy"/>` : `<div class="ph">${icon('image', 24)}</div>`}
+            ${muscleThumb(ex, 100, true)}
             <div class="lib-level">${escapeHtml(ex.level)}</div>
           </div>
           <div class="lib-info">
@@ -1141,11 +1179,10 @@ function editorDayCard(day, di) {
 
 function editorExerciseRow(ex, di, ei) {
   const exData = ex.exId ? EX_BY_ID[ex.exId] : null;
-  const photo = exImage(exData);
   return `
     <div style="display: flex; gap: 8px; align-items: center; padding: 8px; background: var(--bg-2); border-radius: 10px; margin-bottom: 6px;">
-      <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; flex-shrink: 0; background: var(--surface);">
-        ${photo ? `<img src="${photo}" style="width:100%; height:100%; object-fit: cover;" loading="lazy" onerror="this.style.display='none'"/>` : `<div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; color: var(--text-faint);">${icon('image', 18)}</div>`}
+      <div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; flex-shrink: 0;">
+        ${muscleThumb(exData, 30)}
       </div>
       <div style="flex: 1; min-width: 0;">
         <div style="font-size: 12px; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(ex.name)}</div>
@@ -1455,6 +1492,27 @@ function cancelPlanEdit() {
 }
 function setLibSearch(q) { State.libFilter.search = q; render(); }
 function setLibFilter(key, val) { State.libFilter[key] = val; render(); }
+function showExercisePhoto(exId) {
+  const ex = EX_BY_ID[exId];
+  if (!ex) return;
+  const photo = exImage(ex);
+  if (!photo) { toast('Sem foto disponível'); return; }
+  // Simple modal
+  const modal = document.createElement('div');
+  modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:2000; display:flex; align-items:center; justify-content:center; padding:20px;';
+  modal.innerHTML = `
+    <div style="background:var(--surface); border-radius:14px; max-width:400px; max-height:90vh; overflow:auto; padding:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div style="font-weight:700; font-size:14px;">${escapeHtml(ex.name)}</div>
+        <button class="ctrl-btn" style="padding:6px 10px;" onclick="this.closest('div[style*=fixed]').remove()">${icon('x', 14)}</button>
+      </div>
+      <img src="${photo}" style="width:100%; border-radius:8px;" alt="${escapeHtml(ex.name)}"/>
+      <div style="font-size:11px; color:var(--text-faint); margin-top:8px; text-align:center;">Foto: Free Exercise DB</div>
+    </div>
+  `;
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  document.body.appendChild(modal);
+}
 
 /* Cardio */
 function setCardioTab(t) { State.cardioTab = t; render(); }
@@ -1661,3 +1719,4 @@ window.pickExerciseForDay = pickExerciseForDay;
 window.removeEditorEx = removeEditorEx;
 window.savePlan = savePlan;
 window.cancelPlanEdit = cancelPlanEdit;
+window.showExercisePhoto = showExercisePhoto;
