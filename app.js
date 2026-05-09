@@ -59,7 +59,7 @@ const Config = {
 };
 
 /* ===== EXERCISES (loaded from JSON) ===== */
-const IMG_BASE = 'https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/';
+const IMG_BASE = 'https://raw.githubusercontent.com/mohamedatef90/exercise-library/main/';
 let EXERCISES = [];
 let EX_BY_ID = {};
 async function loadExercises() {
@@ -95,6 +95,9 @@ const MUSCLE_COLORS = {
   'Antebraços': { color: '#06b6d4', dark: '#0e7490', label: 'Bíceps' },
   'Tríceps': { color: '#ec4899', dark: '#be185d', label: 'Tríceps' },
   'Abdômen': { color: '#14b8a6', dark: '#0f766e', label: 'Core' },
+  'Serrátil': { color: '#14b8a6', dark: '#0f766e', label: 'Core' },
+  'Costas (cima)': { color: '#2563eb', dark: '#1e40af', label: 'Costas' },
+  'Cardio': { color: '#ff6a00', dark: '#c2410c', label: 'Cardio' },
 };
 function muscleStyle(ex) {
   const primary = (ex && ex.primary && ex.primary[0]) || null;
@@ -109,6 +112,15 @@ function muscleIcon(ex) {
 function muscleThumb(ex, size = 72, withLabel = false) {
   const m = muscleStyle(ex);
   const ic = muscleIcon(ex);
+  const photo = exImage(ex);
+  // If GIF available, show it with subtle colored bottom border
+  if (photo) {
+    return `<div style="width: 100%; height: 100%; background: #ffffff; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; border-bottom: 3px solid ${m.color};">
+      <img src="${photo}" alt="${escapeHtml(ex.name || '')}" style="width: 100%; height: 100%; object-fit: contain;" loading="lazy" onerror="this.parentElement.outerHTML='<div style=&quot;width:100%;height:100%;background:linear-gradient(135deg,${m.color},${m.dark});display:flex;align-items:center;justify-content:center;color:#fff;&quot;>${icon(ic, 22).replace(/"/g, '&quot;')}</div>'"/>
+      ${withLabel ? `<div style="position: absolute; bottom: 5px; left: 5px; background: ${m.color}; color: #fff; font-size: 8px; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px;">${m.label}</div>` : ''}
+    </div>`;
+  }
+  // Fallback colored card (when no GIF)
   return `<div style="width: 100%; height: 100%; background: linear-gradient(135deg, ${m.color} 0%, ${m.dark} 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; gap: 4px;">
     ${icon(ic, size > 60 ? 28 : 22)}
     ${withLabel ? `<div style="font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; opacity: 0.9;">${m.label}</div>` : ''}
@@ -707,7 +719,6 @@ function exerciseExpanded(ex, idx) {
     <div class="ex-expanded" onclick="event.stopPropagation()">
       <div style="aspect-ratio: 16/10; border-radius: 12px; margin: 8px 0 12px; overflow: hidden; position: relative;">
         ${muscleThumb(exData, 100, true)}
-        ${photo ? `<button class="ctrl-btn" style="position: absolute; bottom: 10px; right: 10px; padding: 6px 10px; font-size: 10px; background: rgba(255,255,255,0.92); color: var(--text); border: none;" onclick="event.stopPropagation(); showExercisePhoto('${exData.id}')">${icon('image', 12)} Ver foto</button>` : ''}
       </div>
       ${exData ? `<div style="font-size: 11px; color: var(--text-dim); margin-bottom: 8px;">${escapeHtml(exData.primary.join(', '))} · ${escapeHtml(exData.equipment)} · ${escapeHtml(exData.level)}</div>` : ''}
 
@@ -1663,10 +1674,28 @@ function resetApp() {
   setTimeout(() => location.reload(), 1000);
 }
 
+/* Migrate old plans (Free Exercise DB IDs) to new lib (mohamedatef90 IDs) */
+function migratePlans() {
+  const plans = Plans.list();
+  let changed = false;
+  for (const plan of plans) {
+    for (const day of plan.days || []) {
+      for (const ex of day.exercises || []) {
+        if (!EX_BY_ID[ex.exId]) {
+          const found = EXERCISES.find(e => e.name === ex.name);
+          if (found) { ex.exId = found.id; changed = true; }
+        }
+      }
+    }
+  }
+  if (changed) Store.set('plans', plans);
+}
+
 /* ===== INIT ===== */
 async function init() {
   await loadExercises();
   Plans.seedIfEmpty();
+  migratePlans();
   buildSidebar();
   buildBottomNav();
   navigate('home');
