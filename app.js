@@ -388,21 +388,21 @@ ${userCtx}`;
 
 const AI = {
   async chat(messages) {
-    const key = Config.geminiKey;
-    if (!key) throw new Error('Configure sua chave do Gemini nas configurações primeiro.');
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+    // Use the backend proxy at /api/chat (Cloudflare Pages Function)
+    // This hides the Gemini API key on the server side.
     const body = {
       contents: messages.map(m => ({ role: m.role || 'user', parts: [{ text: m.text }] })),
       systemInstruction: { parts: [{ text: buildCoachSystem() }] }
     };
-    const res = await fetch(url, {
+    const res = await fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!res.ok) {
       const err = await res.text();
-      throw new Error('Erro Gemini: ' + err.slice(0, 200));
+      let msg;
+      try { msg = JSON.parse(err).error || err; } catch { msg = err; }
+      throw new Error('Coach indisponível: ' + msg.slice(0, 200));
     }
     const data = await res.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '(sem resposta)';
@@ -955,40 +955,23 @@ function screenHistorico() {
 
 /* ===== SCREEN: COACH ===== */
 function screenCoach() {
-  const hasKey = !!Config.geminiKey;
   return `
     <div class="coach-header">
       <div>
         <div class="coach-title">Coach IA</div>
         <div class="coach-sub">Crie planos, refine conversando, peça análise</div>
       </div>
-      <div class="coach-status" style="${hasKey ? '' : 'background: rgba(225,29,72,0.15); color: var(--red);'}">${hasKey ? 'Online' : 'Sem chave'}</div>
+      <div class="coach-status">Online</div>
     </div>
     <div class="sub-tabs">
       <div class="sub-tab ${State.coachSubTab === 'chat' ? 'active' : ''}" onclick="setCoachTab('chat')">Conversar</div>
       <div class="sub-tab ${State.coachSubTab === 'planos' ? 'active' : ''}" onclick="setCoachTab('planos')">Meus planos</div>
     </div>
-    ${State.coachSubTab === 'chat' ? coachChat(hasKey) : coachPlans()}
+    ${State.coachSubTab === 'chat' ? coachChat() : coachPlans()}
   `;
 }
 
-function coachChat(hasKey) {
-  if (!hasKey) {
-    return `
-      <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin-top: 4px;">
-        <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">${icon('zap', 16)} Configure o Coach IA</div>
-        <div style="font-size: 12px; color: var(--text-dim); margin-bottom: 12px; line-height: 1.5;">
-          Pra usar o Coach IA, você precisa de uma chave gratuita do Google Gemini ou similar. Cola aqui:
-        </div>
-        <input class="input-field" id="gemini-key" placeholder="AIzaSy..." style="margin-bottom: 10px;" />
-        <button class="workout-btn" onclick="saveGeminiKey()">Salvar chave</button>
-        <div style="font-size: 11px; color: var(--text-faint); margin-top: 10px;">
-          Como pegar: <a href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent);">aistudio.google.com/apikey</a> → Create API key. A chave fica salva só no seu celular.
-        </div>
-      </div>
-    `;
-  }
-
+function coachChat() {
   return `
     <div class="coach-suggestions">
       <div class="coach-sug-pill" onclick="askCoach('Como tá meu progresso esse mês?')">${icon('chart', 12)} Como tá meu progresso?</div>
@@ -1206,11 +1189,6 @@ function screenPerfil() {
       <div class="menu-item" onclick="editProfile()">
         <div class="menu-icon">${icon('user', 18)}</div>
         <div class="menu-text"><div class="menu-name">Dados pessoais</div><div class="menu-sub">Nome, peso, altura, % gordura</div></div>
-        <div class="menu-arrow">${icon('arrow', 16)}</div>
-      </div>
-      <div class="menu-item" onclick="editGeminiKey()">
-        <div class="menu-icon">${icon('zap', 18)}</div>
-        <div class="menu-text"><div class="menu-name">Chave Gemini (Coach IA)</div><div class="menu-sub">${hasKey ? 'Configurada' : 'Não configurada'}</div></div>
         <div class="menu-arrow">${icon('arrow', 16)}</div>
       </div>
       <div class="menu-item" onclick="exportData()">
