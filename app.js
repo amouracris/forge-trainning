@@ -336,33 +336,65 @@ const Timer = {
 };
 
 /* ===== AI: Coach via Gemini ===== */
-const COACH_SYSTEM = `Você é o "Forge Coach", um personal trainer virtual brasileiro especializado em musculação, cardio e CrossFit. Suas características:
-- Responde em português do Brasil, tom amigável mas direto
-- Cria planos de treino baseados no objetivo, nível e disponibilidade
-- Analisa progresso quando o usuário pergunta sobre histórico
-- Sugere ajustes baseados nos dados de treino
-- Sempre considera segurança (não recomenda volume excessivo, pede para parar se sentir dor)
-- Usa unidades em kg e km
-- Quando gerar plano, retorne em formato JSON estruturado
+function buildExercisesContext() {
+  // Compact format: id|name|primary_muscle|equipment|level
+  return EXERCISES.map(e =>
+    `${e.id}|${e.name}|${(e.primary[0] || '?')}|${e.equipment}|${e.level}`
+  ).join('\n');
+}
 
-Não invente dados que você não tem. Se não souber algo, pergunte.`;
+function buildCoachSystem() {
+  const exContext = EXERCISES.length ? buildExercisesContext() : '(biblioteca não carregada)';
+  const hist = Workouts.recentN(5);
+  const week = Workouts.thisWeek();
+  const userCtx = `\nContexto do usuário:\n- Treinos esta semana: ${week.length}\n- Últimos treinos: ${hist.map(w => `${w.dayName || w.planName}`).join('; ') || 'nenhum'}\n- Plano ativo: ${Plans.active()?.name || 'nenhum'}`;
+
+  return `Você é o "Forge Coach", personal trainer virtual brasileiro especializado em musculação, cardio e CrossFit.
+
+REGRAS:
+- Responda sempre em português do Brasil, tom amigável e direto
+- Cria planos de treino usando APENAS exercícios da biblioteca abaixo
+- Use os exIds EXATOS da biblioteca, NUNCA invente IDs
+- Recomende volumes seguros (3-5 séries × 6-15 reps tipicamente)
+- Considere o objetivo, nível e disponibilidade da pessoa
+
+QUANDO criar/atualizar um PLANO de treino, responda em DUAS partes:
+1. Texto curto explicando o plano (máx 2-3 frases)
+2. Bloco JSON em fences markdown \`\`\`json ... \`\`\` com este formato EXATO:
+
+\`\`\`json
+{
+  "type": "plan",
+  "name": "Nome curto do plano",
+  "tag": "Hipertrofia|Força|Cardio|Misto",
+  "days": [
+    {
+      "name": "Push A — Peito e tríceps",
+      "muscle": "Push",
+      "exercises": [
+        {"exId": "id_da_biblioteca", "sets": 4, "reps": 8}
+      ]
+    }
+  ]
+}
+\`\`\`
+
+QUANDO for análise de progresso, dúvida, ajuste sem novo plano, etc → texto normal sem JSON.
+
+BIBLIOTECA DE EXERCÍCIOS (use apenas estes IDs, formato: id|nome|músculo|equipamento|nível):
+${exContext}
+${userCtx}`;
+}
 
 const AI = {
-  async chat(messages, includeContext = true) {
+  async chat(messages) {
     const key = Config.geminiKey;
     if (!key) throw new Error('Configure sua chave do Gemini nas configurações primeiro.');
-
-    let context = '';
-    if (includeContext) {
-      const hist = Workouts.recentN(5);
-      const week = Workouts.thisWeek();
-      context = `\n\nContexto atual do usuário:\n- Treinos esta semana: ${week.length}\n- Últimos 5 treinos: ${hist.map(w => `${w.dayName || w.planName} (${w.duration}min, ${w.totalSets} séries)`).join('; ') || 'nenhum'}\n- Plano ativo: ${Plans.active()?.name || 'nenhum'}\n`;
-    }
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
     const body = {
       contents: messages.map(m => ({ role: m.role || 'user', parts: [{ text: m.text }] })),
-      systemInstruction: { parts: [{ text: COACH_SYSTEM + context }] }
+      systemInstruction: { parts: [{ text: buildCoachSystem() }] }
     };
     const res = await fetch(url, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -376,6 +408,44 @@ const AI = {
     return data.candidates?.[0]?.content?.parts?.[0]?.text || '(sem resposta)';
   }
 };
+
+/** Parse AI response: detect JSON plan block. Returns { text, plan: {...}|null }. */
+function parseAIPlan(text) {
+  // Look for ```json ... ``` block with type: "plan"
+  const m = text.match(/```json\s*\n([\s\S]*?)\n```/);
+  if (!m) return { text, plan: null };
+  try {
+    const obj = JSON.parse(m[1]);
+    if (obj.type === 'plan' && obj.days && Array.isArray(obj.days)) {
+      // Strip the JSON block from text for clean display
+      const cleanText = text.replace(/```json\s*\n[\s\S]*?\n```/, '').trim();
+      // Validate exIds
+      const validDays = obj.days.map(day => ({
+        ...day,
+        exercises: (day.exercises || [])
+          .filter(ex => ex.exId && EX_BY_ID[ex.exId])
+          .map(ex => ({
+            exId: ex.exId,
+            name: EX_BY_ID[ex.exId].name,
+            sets: parseInt(ex.sets) || 3,
+            reps: parseInt(ex.reps) || 10,
+          }))
+      })).filter(d => d.exercises.length > 0);
+      if (validDays.length === 0) return { text, plan: null };
+      return {
+        text: cleanText || 'Plano gerado:',
+        plan: {
+          name: obj.name || 'Plano sem nome',
+          tag: obj.tag || 'Hipertrofia',
+          days: validDays,
+        }
+      };
+    }
+  } catch (e) {
+    console.warn('JSON parse failed:', e);
+  }
+  return { text, plan: null };
+}
 
 /* ===== STATE ===== */
 const State = {
@@ -947,10 +1017,44 @@ function msgBubble(m, i) {
         <div class="ai-avatar">F</div>
         <span>Forge Coach</span>
       </div>
-      <div class="msg ai">${formatMsgText(m.text)}</div>
+      ${m.text ? `<div class="msg ai">${formatMsgText(m.text)}</div>` : ''}
+      ${m.plan ? aiPlanCard(m, i) : ''}
     `;
   }
   return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+}
+
+function aiPlanCard(m, i) {
+  const p = m.plan;
+  const totalEx = p.days.reduce((s, d) => s + d.exercises.length, 0);
+  const dayNames = p.days.map(d => d.name.split('—')[0].trim().slice(0, 12)).join(' · ');
+  return `
+    <div class="ai-plan-card">
+      <div class="ai-plan-tag">${escapeHtml(p.tag)} · ${p.days.length} dias · ${totalEx} exercícios</div>
+      <div class="ai-plan-name">${escapeHtml(p.name)}</div>
+      <div class="ai-plan-days">
+        ${p.days.map(d => `
+          <div class="ai-plan-day">
+            <div class="ai-plan-day-name">${escapeHtml(d.name)}</div>
+            <div class="ai-plan-day-ex">
+              ${d.exercises.map(ex => `<div class="ai-ex-row">
+                <span class="ai-ex-name">${escapeHtml(ex.name)}</span>
+                <span class="ai-ex-vol">${ex.sets}×${ex.reps}</span>
+              </div>`).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="ai-plan-actions">
+        ${m.planAdded ? `
+          <button class="pp-secondary" disabled style="opacity:0.6; cursor:default;">${icon('check', 14)} Adicionado aos seus planos</button>
+        ` : `
+          <button class="pp-primary" onclick="adoptPlan(${i})">${icon('check', 14)} Adicionar plano</button>
+          <button class="pp-secondary" onclick="editAIPlan(${i})">${icon('edit', 14)} Editar antes</button>
+        `}
+      </div>
+    </div>
+  `;
 }
 
 function formatMsgText(text) {
@@ -1620,8 +1724,20 @@ async function askCoach(text) {
   State.chatLoading = true;
   render();
   try {
-    const reply = await AI.chat(State.chatMessages.map(m => ({ role: m.role === 'model' ? 'model' : 'user', text: m.text })));
-    State.chatMessages.push({ role: 'model', text: reply });
+    // Filter out previously embedded plan objects from the API call (only send text)
+    const apiMessages = State.chatMessages.map(m => ({
+      role: m.role === 'model' ? 'model' : 'user',
+      text: m.text
+    }));
+    const rawReply = await AI.chat(apiMessages);
+    // Parse for plan
+    const { text: cleanText, plan } = parseAIPlan(rawReply);
+    State.chatMessages.push({
+      role: 'model',
+      text: cleanText,
+      plan: plan, // {name, tag, days} or null
+      planAdded: false,
+    });
   } catch (e) {
     State.chatMessages.push({ role: 'model', text: '⚠️ ' + e.message });
   }
@@ -1631,6 +1747,61 @@ async function askCoach(text) {
     const list = document.getElementById('msg-list');
     if (list) list.scrollTop = list.scrollHeight;
   }, 50);
+}
+
+/** Save AI-generated plan to user's plans */
+function adoptPlan(msgIdx) {
+  const msg = State.chatMessages[msgIdx];
+  if (!msg || !msg.plan) return;
+  const plan = {
+    id: 'plan-ai-' + Date.now(),
+    name: msg.plan.name,
+    tag: msg.plan.tag,
+    description: 'Criado pelo Coach IA',
+    active: false,
+    createdAt: Date.now(),
+    days: msg.plan.days.map((d, i) => ({
+      id: 'day-' + Date.now() + '-' + i,
+      name: d.name,
+      muscle: d.muscle || '',
+      exercises: d.exercises.map(ex => ({
+        exId: ex.exId,
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+      }))
+    }))
+  };
+  Plans.save(plan);
+  if (Plans.list().length === 1 || !Plans.active()) Plans.setActive(plan.id);
+  msg.planAdded = true;
+  toast('Plano adicionado! Veja em Meus Planos', 'success');
+  render();
+}
+
+/** Open editor to refine an AI plan before saving */
+function editAIPlan(msgIdx) {
+  const msg = State.chatMessages[msgIdx];
+  if (!msg || !msg.plan) return;
+  State.editingPlan = {
+    id: 'plan-ai-' + Date.now(),
+    name: msg.plan.name,
+    tag: msg.plan.tag,
+    active: false,
+    createdAt: Date.now(),
+    days: msg.plan.days.map((d, i) => ({
+      id: 'day-' + Date.now() + '-' + i,
+      name: d.name,
+      muscle: d.muscle || '',
+      exercises: d.exercises.map(ex => ({
+        exId: ex.exId,
+        name: ex.name,
+        sets: ex.sets,
+        reps: ex.reps,
+      }))
+    }))
+  };
+  navigate('plan-editor');
 }
 
 /* Plans CRUD */
@@ -1749,3 +1920,5 @@ window.removeEditorEx = removeEditorEx;
 window.savePlan = savePlan;
 window.cancelPlanEdit = cancelPlanEdit;
 window.showExercisePhoto = showExercisePhoto;
+window.adoptPlan = adoptPlan;
+window.editAIPlan = editAIPlan;
