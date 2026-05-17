@@ -1,9 +1,10 @@
 // FORGE service worker — offline cache
-const CACHE_NAME = 'forge-v12';
+const CACHE_NAME = 'forge-v13';
 const FILES_TO_CACHE = [
   './',
   './index.html',
   './app.js',
+  './firebase.js',
   './exercises.json',
   './manifest.json',
   './icon-192.png',
