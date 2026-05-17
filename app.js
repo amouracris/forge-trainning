@@ -511,27 +511,22 @@ function toast(msg, type = 'info') {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2500);
 }
 
-/* ===== SCREEN: HOME ===== */
+/* ===== SCREEN: HOME (versão simplificada) ===== */
 function screenHome() {
   const user = Config.user;
-  const week = Workouts.thisWeek();
-  const totalMin = week.reduce((s, w) => s + (w.duration || 0), 0);
   const recent = Workouts.recentN(3);
   const active = Workouts.active();
   const plan = Plans.active();
 
-  // Today's workout: if no active workout, suggest based on day of week
-  let todayExercises = 0, todayDuration = 0, todayLabel = '', todayDayId = null;
+  let todayExercises = 0, todayLabel = '', todayDayId = null;
   if (active) {
     todayLabel = active.dayName || active.planName;
     todayExercises = active.exercises.length;
   } else if (plan && plan.days.length) {
-    // Pick day cyclically by day-of-week % days.length
     const di = new Date().getDay() % plan.days.length;
     const day = plan.days[di];
     todayLabel = day.name;
     todayExercises = day.exercises.length;
-    todayDuration = Math.max(30, day.exercises.length * 8);
     todayDayId = day.id;
   }
 
@@ -539,19 +534,12 @@ function screenHome() {
     <div class="greeting">
       <div>
         <div class="greeting-hi">Olá,</div>
-        <div class="greeting-name">${escapeHtml(user.name)} <span class="accent-icon">${icon('flame', 22)}</span></div>
+        <div class="greeting-name">${escapeHtml(user.name)}</div>
       </div>
       <div class="avatar-mini" onclick="navigate('perfil')">${user.name[0] || 'C'}</div>
     </div>
 
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-value">${week.length}</div><div class="stat-label">Treinos<br/>esta semana</div></div>
-      <div class="stat-card"><div class="stat-value">${Math.floor(totalMin/60)}h${(totalMin%60).toString().padStart(2,'0')}</div><div class="stat-label">Tempo<br/>total</div></div>
-      <div class="stat-card"><div class="stat-value">${Workouts.history().length}</div><div class="stat-label">Treinos<br/>totais</div></div>
-    </div>
-
     ${active ? `
-      <div class="section-title"><h2>Treino em andamento</h2></div>
       <div class="workout-hero">
         <span class="workout-tag">Continuar</span>
         <div class="workout-title">${escapeHtml(active.dayName || active.planName)}</div>
@@ -560,60 +548,27 @@ function screenHome() {
           <span class="dot">·</span>
           <span>iniciado ${timeAgo(active.startedAt)}</span>
         </div>
-        <button class="workout-btn" onclick="navigate('musculacao')">${icon('play', 16)} Continuar treino</button>
+        <button class="workout-btn" onclick="navigate('musculacao')">${icon('play', 16)} Continuar</button>
       </div>
     ` : todayLabel ? `
-      <div class="section-title"><h2>Treino sugerido</h2></div>
       <div class="workout-hero">
-        <span class="workout-tag">${escapeHtml(plan?.name || 'Plano')}</span>
+        <span class="workout-tag">Treino de hoje</span>
         <div class="workout-title">${escapeHtml(todayLabel)}</div>
-        <div class="workout-meta">
-          <span>${todayExercises} exercícios</span>
-          <span class="dot">·</span>
-          <span>~${todayDuration} min</span>
-        </div>
-        <button class="workout-btn" onclick="startWorkout('${plan.id}', '${todayDayId}')">${icon('play', 16)} Iniciar treino</button>
+        <div class="workout-meta"><span>${todayExercises} exercícios</span></div>
+        <button class="workout-btn" onclick="startWorkout('${plan.id}', '${todayDayId}')">${icon('play', 16)} Iniciar</button>
       </div>
     ` : `
-      <div class="section-title"><h2>Sem plano ativo</h2></div>
       <div class="workout-hero">
         <span class="workout-tag">Comece agora</span>
-        <div class="workout-title">Crie seu primeiro plano</div>
-        <div class="workout-meta"><span>Monte manual ou peça pra IA</span></div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 14px;">
-          <button class="workout-btn" style="margin: 0;" onclick="openPlanEditor()">${icon('plus', 14)} Criar manual</button>
-          <button class="workout-btn" style="margin: 0; background: var(--bg-2); color: var(--text);" onclick="navigate('coach')">${icon('zap', 14)} Criar com IA</button>
-        </div>
+        <div class="workout-title">Sem plano ativo</div>
+        <div class="workout-meta"><span>Crie pelo Coach IA</span></div>
+        <button class="workout-btn" onclick="navigate('coach')">${icon('zap', 14)} Criar com IA</button>
       </div>
     `}
 
-    <div class="section-title"><h2>Treino rápido</h2></div>
-    <div class="quick-actions">
-      <div class="quick-card" onclick="navigate('cardio')">
-        <div class="quick-icon">${icon('run', 20)}</div>
-        <div class="quick-title">Corrida</div>
-        <div class="quick-sub">Cardio</div>
-      </div>
-      <div class="quick-card" onclick="navigate('funcional')">
-        <div class="quick-icon">${icon('stopwatch', 20)}</div>
-        <div class="quick-title">AMRAP</div>
-        <div class="quick-sub">Funcional</div>
-      </div>
-      <div class="quick-card" onclick="startEmptyWorkout()">
-        <div class="quick-icon">${icon('dumbbell', 20)}</div>
-        <div class="quick-title">Treino livre</div>
-        <div class="quick-sub">Sem plano</div>
-      </div>
-      <div class="quick-card" onclick="navigate('biblioteca')">
-        <div class="quick-icon">${icon('clipboard', 20)}</div>
-        <div class="quick-title">Biblioteca</div>
-        <div class="quick-sub">${EXERCISES.length} ex.</div>
-      </div>
-    </div>
-
     ${recent.length ? `
       <div class="section-title">
-        <h2>Histórico recente</h2>
+        <h2>Últimos treinos</h2>
         <a href="#" onclick="navigate('historico'); return false;">Ver tudo ${icon('arrow', 12)}</a>
       </div>
       <div class="recent-list">
@@ -622,18 +577,13 @@ function screenHome() {
             <div class="recent-icon">${icon('dumbbell', 20)}</div>
             <div class="recent-info">
               <div class="recent-name">${escapeHtml(w.dayName || w.planName || 'Treino')}</div>
-              <div class="recent-meta">${w.totalSets || 0} séries · ${w.duration || 0} min · ${fmt((w.totalVolume||0)/1000, 2)}t</div>
+              <div class="recent-meta">${w.duration || 0} min</div>
             </div>
             <div class="recent-time">${timeAgo(w.startedAt)}</div>
           </div>
         `).join('')}
       </div>
-    ` : `
-      <div class="section-title"><h2>Histórico recente</h2></div>
-      <div style="text-align:center; padding: 24px; background: var(--surface); border: 1px dashed var(--border); border-radius: 14px; color: var(--text-faint); font-size: 13px;">
-        Sem treinos ainda. Faz o primeiro hoje!
-      </div>
-    `}
+    ` : ''}
   `;
 }
 
@@ -728,24 +678,14 @@ function screenMusculacao() {
     `;
   }
 
-  // Active workout in progress
-  const totalEx = w.exercises.length;
-  const doneEx = w.exercises.filter(e => e.finished).length;
-  const pct = totalEx ? (doneEx / totalEx) * 100 : 0;
-
+  // Active workout in progress (simplified)
   return `
     <div class="workout-header">
       <div class="workout-header-info">
-        <div class="label">Em andamento</div>
         <div class="title">${escapeHtml(w.dayName || w.planName)}</div>
       </div>
       <button class="end-btn" onclick="finishWorkout()">Encerrar</button>
     </div>
-    <div class="progress-text">
-      <span>Progresso</span>
-      <span><b>${doneEx} de ${totalEx}</b> exercícios</span>
-    </div>
-    <div class="progress-bar-top"><div class="progress-fill" style="width: ${pct}%"></div></div>
 
     ${w.exercises.length === 0 ? `
       <div style="text-align:center; padding: 24px; background: var(--surface); border-radius: 14px; color: var(--text-dim); font-size: 13px; margin-bottom: 12px;">
@@ -755,9 +695,8 @@ function screenMusculacao() {
 
     ${w.exercises.map((ex, i) => exerciseCard(ex, i, w)).join('')}
 
-    <button class="new-plan-btn" style="margin-top: 12px;" onclick="addExerciseToWorkout()">${icon('plus', 14)} Adicionar exercício da biblioteca</button>
-
-    <button class="workout-btn" style="margin-top: 16px;" onclick="finishWorkout()">${icon('check', 16)} Finalizar treino</button>
+    <button class="new-plan-btn" style="margin-top: 12px;" onclick="addExerciseToWorkout()">${icon('plus', 14)} Adicionar exercício</button>
+    <button class="workout-btn" style="margin-top: 12px;" onclick="finishWorkout()">${icon('check', 16)} Finalizar treino</button>
   `;
 }
 
@@ -775,16 +714,11 @@ function exerciseCard(ex, idx, workout) {
       <div class="ex-row" onclick="toggleExpand(${idx})">
         <div class="ex-thumb">
           ${muscleThumb(exData)}
-          <div class="ex-pill ${status}">${statusLabel}</div>
+          ${done ? `<div class="ex-pill feito">✓</div>` : (setsDone > 0 ? `<div class="ex-pill atual">${setsDone}/${setsTotal}</div>` : '')}
         </div>
         <div class="ex-info">
           <div class="ex-name">${escapeHtml(ex.name)}</div>
-          <div class="ex-meta">${ex.sets} séries × ${ex.reps} reps</div>
-          <div class="ex-progress-row">
-            <div class="mini-progress"><div class="mini-fill ${done ? 'green' : ''}" style="width: ${(setsDone/setsTotal)*100}%"></div></div>
-            <div class="mini-progress-text">${setsDone}/${setsTotal}</div>
-          </div>
-          ${isExpanded && Timer.isRunning() ? `<div class="mini-timer" id="rest-mini">${icon('stopwatch', 12)} <span>Descanso</span></div>` : ''}
+          <div class="ex-meta">${ex.sets} × ${ex.reps} reps</div>
         </div>
       </div>
       ${isExpanded ? exerciseExpanded(ex, idx) : ''}
@@ -808,17 +742,17 @@ function exerciseExpanded(ex, idx) {
 
       <div class="sets-list">
         ${ex.log.map((s, si) => `
-          <div class="set-row">
-            <div class="set-num"><b>${si+1}ª</b> · ${ex.reps} reps</div>
+          <div class="set-row-simple">
+            <div class="set-num-simple">${si+1}</div>
             <div class="set-input-wrap">
               <input class="set-input" inputmode="decimal" placeholder="—" value="${s.kg}" oninput="updateSetKg(${idx}, ${si}, this.value)" />
               <span class="set-input-suffix">kg</span>
             </div>
-            <div class="set-prev">prev<br/><b>${prev}</b></div>
-            <div class="set-check ${s.done ? 'checked' : ''}" onclick="toggleSetDone(${idx}, ${si})">${s.done ? icon('check', 14) : ''}</div>
+            <div class="set-check ${s.done ? 'checked' : ''}" onclick="toggleSetDone(${idx}, ${si})">${s.done ? icon('check', 16) : ''}</div>
           </div>
         `).join('')}
       </div>
+      ${lastWeight ? `<div style="font-size: 10px; color: var(--text-faint); text-align: right; margin-top: 4px;">última carga: ${prev}</div>` : ''}
 
       <div class="rest-timer" id="rest-timer-${idx}" style="display: ${Timer.isRunning() ? 'flex' : 'none'};">
         <div class="timer-circle pulse" id="rest-num-${idx}">—</div>
@@ -1024,7 +958,6 @@ function msgBubble(m, i) {
 function aiPlanCard(m, i) {
   const p = m.plan;
   const totalEx = p.days.reduce((s, d) => s + d.exercises.length, 0);
-  const dayNames = p.days.map(d => d.name.split('—')[0].trim().slice(0, 12)).join(' · ');
   return `
     <div class="ai-plan-card">
       <div class="ai-plan-tag">${escapeHtml(p.tag)} · ${p.days.length} dias · ${totalEx} exercícios</div>
@@ -1034,10 +967,18 @@ function aiPlanCard(m, i) {
           <div class="ai-plan-day">
             <div class="ai-plan-day-name">${escapeHtml(d.name)}</div>
             <div class="ai-plan-day-ex">
-              ${d.exercises.map(ex => `<div class="ai-ex-row">
-                <span class="ai-ex-name">${escapeHtml(ex.name)}</span>
-                <span class="ai-ex-vol">${ex.sets}×${ex.reps}</span>
-              </div>`).join('')}
+              ${d.exercises.map(ex => {
+                const exData = EX_BY_ID[ex.exId];
+                const photo = exImage(exData);
+                return `
+                <div class="ai-ex-row">
+                  <div class="ai-ex-thumb">
+                    ${photo ? `<img src="${photo}" alt="${escapeHtml(ex.name)}" loading="lazy" onerror="this.style.display='none'"/>` : ''}
+                  </div>
+                  <span class="ai-ex-name">${escapeHtml(ex.name)}</span>
+                  <span class="ai-ex-vol">${ex.sets}×${ex.reps}</span>
+                </div>`;
+              }).join('')}
             </div>
           </div>
         `).join('')}
