@@ -1,7 +1,13 @@
 /* ============================================================
    FORGE — Training App
-   Functional version with localStorage persistence
+   localStorage + Firebase (Auth + Firestore sync)
    ============================================================ */
+
+import {
+  auth, db, googleProvider,
+  signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut,
+  doc, getDoc, setDoc
+} from './firebase.js?v=1';
 
 /* ===== ICONS ===== */
 const ICONS = {
@@ -1217,9 +1223,14 @@ function screenPerfil() {
         <div class="menu-text"><div class="menu-name">Exportar dados</div><div class="menu-sub">Backup JSON com tudo</div></div>
         <div class="menu-arrow">${icon('arrow', 16)}</div>
       </div>
+      <div class="menu-item" onclick="doLogout()">
+        <div class="menu-icon" style="background: rgba(107,107,122,0.12); color: var(--text-dim);">${icon('arrowLeft', 18)}</div>
+        <div class="menu-text"><div class="menu-name">Sair (logout)</div><div class="menu-sub">${escapeHtml(currentUser?.email || '')}</div></div>
+        <div class="menu-arrow">${icon('arrow', 16)}</div>
+      </div>
       <div class="menu-item" onclick="resetApp()">
         <div class="menu-icon" style="background: rgba(225,29,72,0.15); color: var(--red);">${icon('trash', 18)}</div>
-        <div class="menu-text"><div class="menu-name" style="color: var(--red);">Apagar dados</div><div class="menu-sub">Remove todos os treinos e planos</div></div>
+        <div class="menu-text"><div class="menu-name" style="color: var(--red);">Apagar dados</div><div class="menu-sub">Remove tudo (local + nuvem)</div></div>
         <div class="menu-arrow">${icon('arrow', 16)}</div>
       </div>
       <div class="menu-item">
@@ -1838,10 +1849,20 @@ function exportData() {
   a.click();
   URL.revokeObjectURL(url);
 }
-function resetApp() {
-  if (!confirm('TEM CERTEZA? Isso apaga TODOS os planos, treinos e histórico. Não tem volta.')) return;
+async function resetApp() {
+  if (!confirm('TEM CERTEZA? Isso apaga TODOS os planos, treinos e histórico (local E na nuvem). Não tem volta.')) return;
   if (!confirm('Sério mesmo? Última chance.')) return;
   Object.keys(localStorage).filter(k => k.startsWith('forge.')).forEach(k => localStorage.removeItem(k));
+  // Also wipe in cloud
+  if (currentUser) {
+    try {
+      await setDoc(doc(db, 'users', currentUser.uid), {
+        plans: [], history: [], active: null,
+        profile: { name: 'Cris', email: currentUser.email, weight: 0, height: 0, bf: 0 },
+        updatedAt: Date.now()
+      }, { merge: true });
+    } catch (e) { console.warn(e); }
+  }
   toast('Tudo limpo. Recarregando...');
   setTimeout(() => location.reload(), 1000);
 }
@@ -1895,6 +1916,119 @@ function migratePlans() {
   }
 }
 
+/* ============================================================
+   FIREBASE: Auth + Firestore sync
+   ============================================================ */
+
+let currentUser = null;
+let syncTimer = null;
+
+/** Push local data to Firestore (debounced) */
+function scheduleSync() {
+  if (!currentUser) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncToCloud, 1000);
+}
+
+async function syncToCloud() {
+  if (!currentUser) return;
+  try {
+    await setDoc(doc(db, 'users', currentUser.uid), {
+      plans: Store.get('plans', []),
+      history: Store.get('workout.history', []),
+      profile: Store.get('config.user', {}),
+      active: Store.get('workout.active', null),
+      updatedAt: Date.now(),
+      email: currentUser.email,
+      name: currentUser.displayName || '',
+    }, { merge: true });
+  } catch (e) {
+    console.warn('Cloud sync failed:', e);
+  }
+}
+
+/** Pull from Firestore. If empty, push local. */
+async function loadFromCloud(uid) {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid));
+    if (snap.exists()) {
+      const data = snap.data();
+      // Pull cloud data into localStorage
+      if (data.plans) localStorage.setItem('forge.plans', JSON.stringify(data.plans));
+      if (data.history) localStorage.setItem('forge.workout.history', JSON.stringify(data.history));
+      if (data.profile) localStorage.setItem('forge.config.user', JSON.stringify(data.profile));
+      if (data.active !== undefined) {
+        if (data.active === null) localStorage.removeItem('forge.workout.active');
+        else localStorage.setItem('forge.workout.active', JSON.stringify(data.active));
+      }
+    } else {
+      // First time: push local data to cloud
+      await syncToCloud();
+    }
+  } catch (e) {
+    console.warn('Cloud load failed:', e);
+  }
+}
+
+/** Wrap Store.set to auto-sync to cloud */
+const _origStoreSet = Store.set;
+Store.set = function(k, v) {
+  _origStoreSet.call(Store, k, v);
+  if (['plans', 'workout.history', 'workout.active', 'config.user'].includes(k)) {
+    scheduleSync();
+  }
+};
+const _origStoreDel = Store.del;
+Store.del = function(k) {
+  _origStoreDel.call(Store, k);
+  if (['workout.active'].includes(k)) scheduleSync();
+};
+
+/* ===== LOGIN SCREEN ===== */
+function showLoginScreen(errorMsg) {
+  document.body.innerHTML = `
+    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; background: linear-gradient(180deg, #fff5e8 0%, #faf8f5 35%, #ffffff 100%); font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; text-align: center;">
+      <div style="width: 88px; height: 88px; background: linear-gradient(135deg, #ff6a00, #e11d48); border-radius: 22px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 42px; box-shadow: 0 8px 24px rgba(255,106,0,0.3); margin-bottom: 24px;">F</div>
+      <h1 style="font-size: 32px; font-weight: 900; color: #1a1a22; margin-bottom: 8px; letter-spacing: 0.5px;">FORGE</h1>
+      <p style="font-size: 14px; color: #6b6b7a; margin-bottom: 32px; max-width: 320px; line-height: 1.5;">Entra com sua conta Google. Seus treinos ficam sincronizados em qualquer celular.</p>
+      <button id="loginBtn" style="background: #fff; color: #1a1a22; border: 1px solid #e8e2d8; padding: 14px 24px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); min-width: 280px; justify-content: center;">
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+        Continuar com Google
+      </button>
+      ${errorMsg ? `<div style="margin-top: 20px; padding: 12px; background: rgba(239,68,68,0.1); color: #ef4444; border-radius: 10px; font-size: 12px; max-width: 340px;">${errorMsg}</div>` : ''}
+      <div style="margin-top: 40px; font-size: 11px; color: #a0a0a8;">v1.0 · Seus dados ficam só na sua conta Google</div>
+    </div>
+  `;
+  document.getElementById('loginBtn').addEventListener('click', doGoogleLogin);
+}
+
+async function doGoogleLogin() {
+  try {
+    await signInWithPopup(auth, googleProvider);
+    // onAuthStateChanged handles the rest
+  } catch (e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
+      // Fallback: redirect flow
+      try {
+        await signInWithRedirect(auth, googleProvider);
+      } catch (e2) {
+        showLoginScreen('Erro no login: ' + e2.message);
+      }
+    } else {
+      showLoginScreen('Erro: ' + e.message);
+    }
+  }
+}
+
+async function doLogout() {
+  if (!confirm('Sair? Seus dados continuam salvos na nuvem e voltam quando você logar de novo.')) return;
+  // Clear local cache before logout
+  Object.keys(localStorage).filter(k => k.startsWith('forge.')).forEach(k => localStorage.removeItem(k));
+  await signOut(auth);
+  location.reload();
+}
+window.doLogout = doLogout;
+
 /* ===== INIT ===== */
 async function init() {
   await loadExercises();
@@ -1909,7 +2043,43 @@ async function init() {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 }
-window.addEventListener('DOMContentLoaded', init);
+
+/** Main bootstrap: check auth, show login or app */
+async function bootstrap() {
+  // Show loading state
+  document.body.innerHTML = `
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(180deg, #fff5e8 0%, #faf8f5 50%, #ffffff 100%); font-family: -apple-system, system-ui, sans-serif;">
+      <div style="text-align: center;">
+        <div style="width: 60px; height: 60px; background: linear-gradient(135deg, #ff6a00, #e11d48); border-radius: 14px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 28px; margin: 0 auto 16px;">F</div>
+        <div style="font-size: 13px; color: #6b6b7a;">Carregando...</div>
+      </div>
+    </div>
+  `;
+
+  // Handle redirect result if any
+  try { await getRedirectResult(auth); } catch {}
+
+  // Auth state listener
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      currentUser = user;
+      // Pull cloud data first (overwrites local)
+      await loadFromCloud(user.uid);
+      // Restore original HTML structure
+      document.body.innerHTML = ORIGINAL_BODY;
+      // Init the app
+      await init();
+    } else {
+      currentUser = null;
+      showLoginScreen();
+    }
+  });
+}
+
+// Save original body markup for restoration after login
+const ORIGINAL_BODY = document.body.innerHTML;
+
+bootstrap();
 
 // Export functions to global for onclick handlers
 window.navigate = navigate;
