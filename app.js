@@ -558,6 +558,13 @@ function screenHome() {
     </div>
 
     ${plan ? `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin: 4px 0 10px;">
+        <div>
+          <div style="font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 1px; font-weight: 700;">Sua semana</div>
+          <div style="font-size: 13px; color: var(--text); font-weight: 700; margin-top: 2px;">${escapeHtml(plan.name)}</div>
+        </div>
+        ${Plans.list().length > 1 ? `<a href="#" onclick="navigate('coach'); setCoachTab('planos'); return false;" style="font-size: 11px; color: var(--accent); text-decoration: none; font-weight: 600;">Trocar plano</a>` : ''}
+      </div>
       <div class="week-strip">
         ${weekStrip.map(w => `
           <div class="week-day ${w.isToday ? 'today' : ''} ${w.day ? 'has' : 'rest'}"
@@ -1583,11 +1590,11 @@ function savePlan() {
   const hasAnyEx = p.days.some(d => d.exercises.length > 0);
   if (!hasAnyEx) { toast('Adiciona pelo menos 1 exercício', 'error'); return; }
   Plans.save(p);
-  if (Plans.list().length === 1) Plans.setActive(p.id);
-  toast('Plano salvo!', 'success');
+  // Auto-activate: user just created/edited this plan, wants to use it
+  Plans.setActive(p.id);
+  toast('Plano ativado!', 'success');
   State.editingPlan = null;
-  State.coachSubTab = 'planos';
-  navigate('coach');
+  navigate('home');
 }
 function cancelPlanEdit() {
   if (State.editingPlan && (State.editingPlan.name || State.editingPlan.days.length > 0)) {
@@ -1765,10 +1772,12 @@ function adoptPlan(msgIdx) {
     }))
   };
   Plans.save(plan);
-  if (Plans.list().length === 1 || !Plans.active()) Plans.setActive(plan.id);
+  // Auto-activate: user just asked for this plan, makes sense to use it now
+  Plans.setActive(plan.id);
   msg.planAdded = true;
-  toast('Plano adicionado! Veja em Meus Planos', 'success');
-  render();
+  toast('Plano ativado! Veja na Home', 'success');
+  // Navigate to Home so user sees the new plan in the weekly calendar
+  setTimeout(() => navigate('home'), 800);
 }
 
 /** Open editor to refine an AI plan before saving */
