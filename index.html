@@ -700,6 +700,39 @@
   .lib-muscle { font-size: 10px; color: var(--text-dim); margin-top: 3px; }
   .lib-equip { font-size: 10px; color: var(--accent); margin-top: 2px; font-weight: 600; }
 
+  /* ===== Week strip (calendar) ===== */
+  .week-strip {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+    margin-bottom: 16px;
+  }
+  .week-day {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 2px;
+    text-align: center; cursor: pointer;
+    transition: all 0.15s;
+    min-height: 64px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .week-day.has:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .week-day.rest { cursor: default; opacity: 0.55; }
+  .week-day.today {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    border-width: 2px;
+  }
+  .week-day-label {
+    font-size: 9px; font-weight: 700;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+  }
+  .week-day.today .week-day-label { color: var(--accent); }
+  .week-day-content { display: flex; align-items: center; justify-content: center; flex: 1; }
+  .week-day-name {
+    font-size: 10px; font-weight: 700; color: var(--text);
+    line-height: 1.1;
+  }
+  .week-day-rest { font-size: 14px; color: var(--text-faint); }
+
   /* ===== AI-generated plan card in chat ===== */
   .ai-plan-card {
     background: linear-gradient(135deg, #fff5e8 0%, #ffffff 60%);
@@ -870,6 +903,6 @@
   </div>
 </div>
 
-<script src="./app.js?v=10"></script>
+<script src="./app.js?v=11"></script>
 </body>
 </html>
