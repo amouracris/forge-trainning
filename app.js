@@ -511,37 +511,69 @@ function toast(msg, type = 'info') {
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2500);
 }
 
-/* ===== SCREEN: HOME (versão simplificada) ===== */
+/* ===== SCREEN: HOME (com calendário semanal) ===== */
+const WEEKDAYS = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
+const WEEKDAYS_LONG = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+
+/** Maps weekday (0=Sun, 1=Mon, etc) → plan day. Returns plan.days[i] or null (rest day). */
+function dayForWeekday(plan, weekday) {
+  if (!plan || !plan.days || !plan.days.length) return null;
+  // Custom map first (if plan has weekdayMap)
+  if (plan.weekdayMap && plan.weekdayMap[weekday] !== undefined) {
+    const dayIdx = plan.weekdayMap[weekday];
+    return dayIdx === null ? null : (plan.days[dayIdx] || null);
+  }
+  // Default: starting Monday, cyclical
+  const monStart = weekday === 0 ? 6 : weekday - 1; // 0=Mon, 6=Sun
+  // For N-day plans, map first N weekdays starting Monday
+  if (monStart >= plan.days.length) return null; // rest day
+  return plan.days[monStart];
+}
+
 function screenHome() {
   const user = Config.user;
   const recent = Workouts.recentN(3);
   const active = Workouts.active();
   const plan = Plans.active();
 
-  let todayExercises = 0, todayLabel = '', todayDayId = null;
-  if (active) {
-    todayLabel = active.dayName || active.planName;
-    todayExercises = active.exercises.length;
-  } else if (plan && plan.days.length) {
-    const di = new Date().getDay() % plan.days.length;
-    const day = plan.days[di];
-    todayLabel = day.name;
-    todayExercises = day.exercises.length;
-    todayDayId = day.id;
-  }
+  const todayWeekday = new Date().getDay();
+  const todayName = WEEKDAYS_LONG[todayWeekday];
+  const todayPlanDay = dayForWeekday(plan, todayWeekday);
+
+  // Build week strip starting on Monday for cleaner UX
+  const weekOrder = [1, 2, 3, 4, 5, 6, 0]; // Mon-Sun
+  const weekStrip = weekOrder.map(wd => {
+    const dayObj = dayForWeekday(plan, wd);
+    const isToday = wd === todayWeekday;
+    return { wd, label: WEEKDAYS[wd], day: dayObj, isToday };
+  });
 
   return `
     <div class="greeting">
       <div>
-        <div class="greeting-hi">Olá,</div>
+        <div class="greeting-hi">${todayName.toLowerCase()},</div>
         <div class="greeting-name">${escapeHtml(user.name)}</div>
       </div>
       <div class="avatar-mini" onclick="navigate('perfil')">${user.name[0] || 'C'}</div>
     </div>
 
+    ${plan ? `
+      <div class="week-strip">
+        ${weekStrip.map(w => `
+          <div class="week-day ${w.isToday ? 'today' : ''} ${w.day ? 'has' : 'rest'}"
+            ${w.day ? `onclick="startWorkoutByWeekday(${w.wd})"` : ''}>
+            <div class="week-day-label">${w.label}</div>
+            <div class="week-day-content">
+              ${w.day ? `<div class="week-day-name">${escapeHtml(w.day.muscle || w.day.name.split('—')[0].trim().split(' ').slice(0,2).join(' '))}</div>` : `<div class="week-day-rest">—</div>`}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+
     ${active ? `
       <div class="workout-hero">
-        <span class="workout-tag">Continuar</span>
+        <span class="workout-tag">Em andamento</span>
         <div class="workout-title">${escapeHtml(active.dayName || active.planName)}</div>
         <div class="workout-meta">
           <span>${active.exercises.length} exercícios</span>
@@ -550,12 +582,18 @@ function screenHome() {
         </div>
         <button class="workout-btn" onclick="navigate('musculacao')">${icon('play', 16)} Continuar</button>
       </div>
-    ` : todayLabel ? `
+    ` : todayPlanDay ? `
       <div class="workout-hero">
-        <span class="workout-tag">Treino de hoje</span>
-        <div class="workout-title">${escapeHtml(todayLabel)}</div>
-        <div class="workout-meta"><span>${todayExercises} exercícios</span></div>
-        <button class="workout-btn" onclick="startWorkout('${plan.id}', '${todayDayId}')">${icon('play', 16)} Iniciar</button>
+        <span class="workout-tag">Treino de ${todayName.toLowerCase()}</span>
+        <div class="workout-title">${escapeHtml(todayPlanDay.name)}</div>
+        <div class="workout-meta"><span>${todayPlanDay.exercises.length} exercícios</span></div>
+        <button class="workout-btn" onclick="startWorkout('${plan.id}', '${todayPlanDay.id}')">${icon('play', 16)} Iniciar</button>
+      </div>
+    ` : plan ? `
+      <div class="workout-hero">
+        <span class="workout-tag">Hoje</span>
+        <div class="workout-title">Dia de descanso</div>
+        <div class="workout-meta"><span>Recupera bem pra amanhã</span></div>
       </div>
     ` : `
       <div class="workout-hero">
@@ -585,6 +623,14 @@ function screenHome() {
       </div>
     ` : ''}
   `;
+}
+
+function startWorkoutByWeekday(wd) {
+  const plan = Plans.active();
+  if (!plan) return;
+  const day = dayForWeekday(plan, wd);
+  if (!day) { toast('Dia de descanso'); return; }
+  startWorkout(plan.id, day.id);
 }
 
 /* ===== SCREEN: TREINO TIPO ===== */
@@ -700,6 +746,19 @@ function screenMusculacao() {
   `;
 }
 
+function resolveExData(ex) {
+  // Self-healing: if exId not found, try by name
+  if (ex.exId && EX_BY_ID[ex.exId]) return EX_BY_ID[ex.exId];
+  const found = findExByName(ex.name);
+  if (found && ex.exId !== found.id) {
+    ex.exId = found.id;
+    // Persist the fix
+    const w = Workouts.active();
+    if (w) Workouts.setActive(w);
+  }
+  return found;
+}
+
 function exerciseCard(ex, idx, workout) {
   const done = ex.finished;
   const setsDone = ex.log.filter(s => s.done).length;
@@ -708,7 +767,7 @@ function exerciseCard(ex, idx, workout) {
   const status = done ? 'feito' : (isExpanded ? 'atual' : 'pendente');
   const statusLabel = done ? 'Feito' : (isExpanded ? 'Atual' : (setsDone > 0 ? 'Em andamento' : 'Pendente'));
 
-  const exData = ex.exId ? EX_BY_ID[ex.exId] : null;
+  const exData = resolveExData(ex);
   return `
     <div class="ex-card ${done ? 'done' : ''} ${isExpanded ? 'active' : ''}">
       <div class="ex-row" onclick="toggleExpand(${idx})">
@@ -727,7 +786,7 @@ function exerciseCard(ex, idx, workout) {
 }
 
 function exerciseExpanded(ex, idx) {
-  const exData = ex.exId ? EX_BY_ID[ex.exId] : null;
+  const exData = resolveExData(ex);
   const photo = exImage(exData);
   const lastWeight = Workouts.lastWeight(ex.name);
   const prev = lastWeight ? `${fmt(lastWeight, 1)} kg` : '—';
@@ -1778,7 +1837,27 @@ function resetApp() {
   setTimeout(() => location.reload(), 1000);
 }
 
-/* Migrate old plans (Free Exercise DB IDs) to new lib (mohamedatef90 IDs) */
+/* Migrate old plans + active workout (Free Exercise DB IDs) to new lib (mohamedatef90 IDs) */
+function findExByName(name) {
+  if (!name) return null;
+  // Exact match
+  let f = EXERCISES.find(e => e.name === name);
+  if (f) return f;
+  // Case-insensitive
+  const lc = name.toLowerCase();
+  f = EXERCISES.find(e => e.name.toLowerCase() === lc);
+  if (f) return f;
+  // English name
+  f = EXERCISES.find(e => e.name_en && e.name_en.toLowerCase() === lc);
+  if (f) return f;
+  // Partial match (first few words)
+  const words = lc.split(/\s+/).slice(0, 2).join(' ');
+  if (words.length > 4) {
+    f = EXERCISES.find(e => e.name.toLowerCase().includes(words));
+    if (f) return f;
+  }
+  return null;
+}
 function migratePlans() {
   const plans = Plans.list();
   let changed = false;
@@ -1786,13 +1865,25 @@ function migratePlans() {
     for (const day of plan.days || []) {
       for (const ex of day.exercises || []) {
         if (!EX_BY_ID[ex.exId]) {
-          const found = EXERCISES.find(e => e.name === ex.name);
+          const found = findExByName(ex.name);
           if (found) { ex.exId = found.id; changed = true; }
         }
       }
     }
   }
   if (changed) Store.set('plans', plans);
+  // Also migrate active workout if exists
+  const active = Workouts.active();
+  if (active) {
+    let aChanged = false;
+    for (const ex of active.exercises || []) {
+      if (!EX_BY_ID[ex.exId]) {
+        const found = findExByName(ex.name);
+        if (found) { ex.exId = found.id; aChanged = true; }
+      }
+    }
+    if (aChanged) Workouts.setActive(active);
+  }
 }
 
 /* ===== INIT ===== */
@@ -1855,3 +1946,4 @@ window.cancelPlanEdit = cancelPlanEdit;
 window.showExercisePhoto = showExercisePhoto;
 window.adoptPlan = adoptPlan;
 window.editAIPlan = editAIPlan;
+window.startWorkoutByWeekday = startWorkoutByWeekday;
