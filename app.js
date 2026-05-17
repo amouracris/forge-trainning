@@ -6,8 +6,9 @@
 import {
   auth, db, googleProvider,
   signInWithPopup, signInWithRedirect, getRedirectResult, onAuthStateChanged, signOut,
+  createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail,
   doc, getDoc, setDoc
-} from './firebase.js?v=1';
+} from './firebase.js?v=2';
 
 /* ===== ICONS ===== */
 const ICONS = {
@@ -1984,38 +1985,131 @@ Store.del = function(k) {
   if (['workout.active'].includes(k)) scheduleSync();
 };
 
-/* ===== LOGIN SCREEN ===== */
+/* ===== LOGIN SCREEN (email/senha + Google) ===== */
+let loginMode = 'signin'; // 'signin' | 'signup'
+
 function showLoginScreen(errorMsg) {
+  const isSignup = loginMode === 'signup';
   document.body.innerHTML = `
-    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; background: linear-gradient(180deg, #fff5e8 0%, #faf8f5 35%, #ffffff 100%); font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; text-align: center;">
-      <div style="width: 88px; height: 88px; background: linear-gradient(135deg, #ff6a00, #e11d48); border-radius: 22px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 42px; box-shadow: 0 8px 24px rgba(255,106,0,0.3); margin-bottom: 24px;">F</div>
-      <h1 style="font-size: 32px; font-weight: 900; color: #1a1a22; margin-bottom: 8px; letter-spacing: 0.5px;">FORGE</h1>
-      <p style="font-size: 14px; color: #6b6b7a; margin-bottom: 32px; max-width: 320px; line-height: 1.5;">Entra com sua conta Google. Seus treinos ficam sincronizados em qualquer celular.</p>
-      <button id="loginBtn" style="background: #fff; color: #1a1a22; border: 1px solid #e8e2d8; padding: 14px 24px; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); min-width: 280px; justify-content: center;">
-        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
-        Continuar com Google
-      </button>
-      ${errorMsg ? `<div style="margin-top: 20px; padding: 12px; background: rgba(239,68,68,0.1); color: #ef4444; border-radius: 10px; font-size: 12px; max-width: 340px;">${errorMsg}</div>` : ''}
-      <div style="margin-top: 40px; font-size: 11px; color: #a0a0a8;">v1.0 · Seus dados ficam só na sua conta Google</div>
+    <div style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; background: linear-gradient(180deg, #fff5e8 0%, #faf8f5 35%, #ffffff 100%); font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;">
+      <div style="text-align: center; margin-bottom: 28px;">
+        <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #ff6a00, #e11d48); border-radius: 20px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 900; font-size: 38px; box-shadow: 0 8px 24px rgba(255,106,0,0.3); margin: 0 auto 18px;">F</div>
+        <h1 style="font-size: 28px; font-weight: 900; color: #1a1a22; margin-bottom: 4px;">FORGE</h1>
+        <p style="font-size: 13px; color: #6b6b7a;">${isSignup ? 'Crie sua conta pra começar' : 'Entre pra acessar seus treinos'}</p>
+      </div>
+
+      <div style="width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 10px;">
+        <input id="loginEmail" type="email" placeholder="seu@email.com" autocomplete="email"
+          style="background: #fff; border: 1px solid #e8e2d8; border-radius: 12px; padding: 14px; font-size: 15px; width: 100%; font-family: inherit;" />
+        <input id="loginPassword" type="password" placeholder="${isSignup ? 'Crie uma senha (6+ caracteres)' : 'Sua senha'}" autocomplete="${isSignup ? 'new-password' : 'current-password'}"
+          style="background: #fff; border: 1px solid #e8e2d8; border-radius: 12px; padding: 14px; font-size: 15px; width: 100%; font-family: inherit;" />
+
+        <button id="emailBtn"
+          style="background: #ff6a00; color: #000; border: none; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; margin-top: 4px;">
+          ${isSignup ? 'Criar conta' : 'Entrar'}
+        </button>
+
+        ${!isSignup ? `<a id="forgotBtn" href="#" style="text-align: center; color: #6b6b7a; font-size: 12px; text-decoration: none; padding: 4px 0;">Esqueci a senha</a>` : ''}
+
+        <div style="display: flex; align-items: center; gap: 12px; margin: 12px 0; color: #a0a0a8; font-size: 11px;">
+          <div style="flex:1; height:1px; background:#e8e2d8;"></div>
+          OU
+          <div style="flex:1; height:1px; background:#e8e2d8;"></div>
+        </div>
+
+        <button id="googleBtn"
+          style="background: #fff; color: #1a1a22; border: 1px solid #e8e2d8; padding: 13px 16px; border-radius: 12px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 12px; justify-content: center;">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/><path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/><path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/><path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/></svg>
+          Continuar com Google
+        </button>
+
+        ${errorMsg ? `<div style="margin-top: 12px; padding: 12px; background: rgba(239,68,68,0.1); color: #ef4444; border-radius: 10px; font-size: 12px; text-align: center;">${errorMsg}</div>` : ''}
+
+        <div style="text-align: center; margin-top: 18px; font-size: 13px; color: #6b6b7a;">
+          ${isSignup ? 'Já tem conta?' : 'Ainda não tem conta?'}
+          <a id="toggleBtn" href="#" style="color: #ff6a00; text-decoration: none; font-weight: 600; margin-left: 4px;">
+            ${isSignup ? 'Entrar' : 'Criar conta'}
+          </a>
+        </div>
+      </div>
     </div>
   `;
-  document.getElementById('loginBtn').addEventListener('click', doGoogleLogin);
+  document.getElementById('emailBtn').addEventListener('click', doEmailAuth);
+  document.getElementById('googleBtn').addEventListener('click', doGoogleLogin);
+  document.getElementById('toggleBtn').addEventListener('click', (e) => {
+    e.preventDefault();
+    loginMode = isSignup ? 'signin' : 'signup';
+    showLoginScreen();
+  });
+  const forgot = document.getElementById('forgotBtn');
+  if (forgot) forgot.addEventListener('click', doResetPassword);
+  // Allow Enter to submit
+  ['loginEmail', 'loginPassword'].forEach(id => {
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doEmailAuth();
+    });
+  });
+}
+
+function friendlyAuthError(code) {
+  const map = {
+    'auth/invalid-email': 'Email inválido',
+    'auth/user-not-found': 'Email não cadastrado. Clique em "Criar conta" abaixo.',
+    'auth/wrong-password': 'Senha incorreta',
+    'auth/invalid-credential': 'Email ou senha incorretos',
+    'auth/email-already-in-use': 'Email já cadastrado. Clica em "Entrar"',
+    'auth/weak-password': 'Senha muito curta. Use 6+ caracteres',
+    'auth/too-many-requests': 'Muitas tentativas. Aguarda um pouco',
+    'auth/network-request-failed': 'Sem internet'
+  };
+  return map[code] || code || 'Erro desconhecido';
+}
+
+async function doEmailAuth() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!email || !password) {
+    showLoginScreen('Preencha email e senha');
+    return;
+  }
+  try {
+    if (loginMode === 'signup') {
+      await createUserWithEmailAndPassword(auth, email, password);
+    } else {
+      await signInWithEmailAndPassword(auth, email, password);
+    }
+    // onAuthStateChanged handles the rest
+  } catch (e) {
+    showLoginScreen(friendlyAuthError(e.code));
+  }
+}
+
+async function doResetPassword() {
+  const email = document.getElementById('loginEmail').value.trim();
+  if (!email) {
+    showLoginScreen('Digite seu email primeiro pra receber o link de reset');
+    return;
+  }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    showLoginScreen('Link de reset enviado pro seu email! Confere a caixa de entrada.');
+  } catch (e) {
+    showLoginScreen(friendlyAuthError(e.code));
+  }
 }
 
 async function doGoogleLogin() {
   try {
     await signInWithPopup(auth, googleProvider);
-    // onAuthStateChanged handles the rest
   } catch (e) {
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
-      // Fallback: redirect flow
       try {
         await signInWithRedirect(auth, googleProvider);
       } catch (e2) {
         showLoginScreen('Erro no login: ' + e2.message);
       }
     } else {
-      showLoginScreen('Erro: ' + e.message);
+      showLoginScreen('Erro: ' + friendlyAuthError(e.code));
     }
   }
 }
