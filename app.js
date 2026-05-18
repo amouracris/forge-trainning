@@ -344,27 +344,45 @@ const Timer = {
 
 /* ===== AI: Coach via Gemini ===== */
 function buildExercisesContext() {
-  // Compact format: id|name|primary_muscle|equipment|level
+  // Compact format: id|name|primary_muscle (smaller than before)
   return EXERCISES.map(e =>
-    `${e.id}|${e.name}|${(e.primary[0] || '?')}|${e.equipment}|${e.level}`
+    `${e.id}|${e.name}|${(e.primary[0] || '?')}`
   ).join('\n');
 }
 
-function buildCoachSystem() {
-  const exContext = EXERCISES.length ? buildExercisesContext() : '(biblioteca não carregada)';
+/** Detect if user intent is to create/modify a plan (vs just chat/analysis). */
+function isPlanIntent(messages) {
+  const last = messages.length ? (messages[messages.length - 1].text || '').toLowerCase() : '';
+  const planKeywords = [
+    'crie ', 'criar ', 'monta ', 'montar ', 'gera ', 'gerar ',
+    'novo plano', 'plano de', 'plano novo', 'plano pra', 'plano para',
+    'treino de', 'treino pra', 'treino para',
+    'troca ', 'trocar ', 'substitui', 'substituir',
+    'adiciona ', 'remove ', 'remover ',
+    'ajusta ', 'ajustar ',
+    'cria um', 'cria treino', 'cria plano'
+  ];
+  return planKeywords.some(k => last.includes(k));
+}
+
+function buildCoachSystem(includeLibrary) {
   const hist = Workouts.recentN(5);
   const week = Workouts.thisWeek();
   const userCtx = `\nContexto do usuário:\n- Treinos esta semana: ${week.length}\n- Últimos treinos: ${hist.map(w => `${w.dayName || w.planName}`).join('; ') || 'nenhum'}\n- Plano ativo: ${Plans.active()?.name || 'nenhum'}`;
+
+  let libSection = '';
+  if (includeLibrary) {
+    const exContext = EXERCISES.length ? buildExercisesContext() : '(biblioteca não carregada)';
+    libSection = `\n\nBIBLIOTECA DE EXERCÍCIOS (use apenas estes IDs, formato: id|nome|músculo):\n${exContext}`;
+  }
 
   return `Você é o "Forge Coach", personal trainer virtual brasileiro especializado em musculação, cardio e CrossFit.
 
 REGRAS:
 - Responda sempre em português do Brasil, tom amigável e direto
-- Cria planos de treino usando APENAS exercícios da biblioteca abaixo
-- Use os exIds EXATOS da biblioteca, NUNCA invente IDs
+- ${includeLibrary ? 'Cria planos usando APENAS exercícios da biblioteca abaixo. Use exIds EXATOS, NUNCA invente.' : 'Responda dúvidas, analise progresso, sugira ajustes.'}
 - Recomende volumes seguros (3-5 séries × 6-15 reps tipicamente)
-- Considere o objetivo, nível e disponibilidade da pessoa
-
+${includeLibrary ? `
 QUANDO criar/atualizar um PLANO de treino, responda em DUAS partes:
 1. Texto curto explicando o plano (máx 2-3 frases)
 2. Bloco JSON em fences markdown \`\`\`json ... \`\`\` com este formato EXATO:
@@ -385,23 +403,20 @@ QUANDO criar/atualizar um PLANO de treino, responda em DUAS partes:
   ]
 }
 \`\`\`
-
-QUANDO for análise de progresso, dúvida, ajuste sem novo plano, etc → texto normal sem JSON.
-
-BIBLIOTECA DE EXERCÍCIOS (use apenas estes IDs, formato: id|nome|músculo|equipamento|nível):
-${exContext}
-${userCtx}`;
+` : ''}${userCtx}${libSection}`;
 }
 
 const AI = {
   async chat(messages) {
     // Use the backend proxy at /api/chat (Cloudflare Pages Function)
     // This hides the Gemini API key on the server side.
+    // Only include the full exercise library when user wants to create a plan
+    const needsLibrary = isPlanIntent(messages);
     const body = {
       contents: messages.map(m => ({ role: m.role || 'user', parts: [{ text: m.text }] })),
-      systemInstruction: { parts: [{ text: buildCoachSystem() }] }
+      systemInstruction: { parts: [{ text: buildCoachSystem(needsLibrary) }] }
     };
-    const res = await fetch('/api/chat', {
+    const res = await fetch('/api/chat?_=' + Date.now(), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
@@ -1948,24 +1963,38 @@ async function syncToCloud() {
   }
 }
 
-/** Pull from Firestore. If empty, push local. */
+/** Pull from Firestore. Merge intelligently:
+ *  - cloud has data → use cloud (overwrite local)
+ *  - cloud empty + local has data → push local
+ *  - both empty → nothing
+ */
 async function loadFromCloud(uid) {
   try {
     const snap = await getDoc(doc(db, 'users', uid));
-    if (snap.exists()) {
-      const data = snap.data();
-      // Pull cloud data into localStorage
-      if (data.plans) localStorage.setItem('forge.plans', JSON.stringify(data.plans));
-      if (data.history) localStorage.setItem('forge.workout.history', JSON.stringify(data.history));
-      if (data.profile) localStorage.setItem('forge.config.user', JSON.stringify(data.profile));
-      if (data.active !== undefined) {
-        if (data.active === null) localStorage.removeItem('forge.workout.active');
-        else localStorage.setItem('forge.workout.active', JSON.stringify(data.active));
+    const cloudData = snap.exists() ? snap.data() : null;
+
+    const localPlans = Store.get('plans', []);
+    const localHistory = Store.get('workout.history', []);
+
+    const cloudPlans = (cloudData && cloudData.plans) || [];
+    const cloudHistory = (cloudData && cloudData.history) || [];
+    const cloudHasData = cloudPlans.length > 0 || cloudHistory.length > 0;
+    const localHasData = localPlans.length > 0 || localHistory.length > 0;
+
+    if (cloudHasData) {
+      // Cloud wins
+      if (cloudData.plans) localStorage.setItem('forge.plans', JSON.stringify(cloudData.plans));
+      if (cloudData.history) localStorage.setItem('forge.workout.history', JSON.stringify(cloudData.history));
+      if (cloudData.profile) localStorage.setItem('forge.config.user', JSON.stringify(cloudData.profile));
+      if (cloudData.active !== undefined) {
+        if (cloudData.active === null) localStorage.removeItem('forge.workout.active');
+        else localStorage.setItem('forge.workout.active', JSON.stringify(cloudData.active));
       }
-    } else {
-      // First time: push local data to cloud
+    } else if (localHasData) {
+      // Local has data, cloud empty → push local to cloud
       await syncToCloud();
     }
+    // both empty → nothing to do
   } catch (e) {
     console.warn('Cloud load failed:', e);
   }
