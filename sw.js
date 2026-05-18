@@ -1,5 +1,5 @@
 // FORGE service worker — offline cache
-const CACHE_NAME = 'forge-v14';
+const CACHE_NAME = 'forge-v15';
 const FILES_TO_CACHE = [
   './',
   './index.html',
